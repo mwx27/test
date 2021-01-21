@@ -1,0 +1,263 @@
+Option Explicit
+Public Rząd As Integer
+Public numer_miesiąca As Integer
+Public stary_rok, nowy_rok As Integer
+
+
+'==================================================
+'=====================DODAWANIE====================
+'==================================================
+
+Sub nowa_pozycja()
+'dodawanie nowego wiersza w zaznaczonym miesiącu
+Dim i, ostatnia_kolumna As Integer
+i = ActiveCell.Row
+
+Do
+    If Cells(i, 3).Value = "Suma:" Then Rząd = i - 1
+    i = i + 1
+Loop Until Rząd = i - 2
+
+ostatnia_kolumna = Range("C3").End(xlToRight).Column
+Rows(Rząd).Insert Shift:=xlDown, CopyOrigin:=xlFormatFromLeftOrAbove
+
+Range(Cells(Rząd + 1, 3), Cells(Rząd + 1, ostatnia_kolumna).End(xlToRight)).Copy Range(Cells(Rząd, 3), Cells(Rząd, ostatnia_kolumna).End(xlToRight))
+Range(Cells(Rząd + 1, 3), Cells(Rząd + 1, ostatnia_kolumna).End(xlToRight)).ClearContents
+
+
+End Sub
+
+
+Sub dodaj_nowy_miesiąc()
+
+Application.ScreenUpdating = False
+Call Szukanie_komórek
+
+Dim wiersze, pozycja_1, pozycja_2, nowy_miesiąc, suma As String
+Dim rok, ilość, i, j, k, L As Integer
+
+ilość = Ilość_rzędów_bazowa() - 2
+wiersze = "4:" & 5 + ilość  'ilość nowych wierszy do wstawienia
+
+'określanie nowego miesiąca
+nowy_miesiąc = wykryj_miesiąc("nowy")
+
+'wstawienie nowego wiersza
+Rows(wiersze).Insert Shift:=xlDown, CopyOrigin:=xlFormatFromRightOrBelow
+
+
+'scalenie komórki z miesiącem i nadanie sumy
+Range(Cells(4, 2), Cells(5 + ilość, 2)).Merge
+
+'ustalanie formuły dla sumowania kategorii dla komórki z miesiącem
+For i = Range("C3").Column To Range("C3").End(xlToRight).Column Step 2
+    suma = suma & Cells(4 + ilość, 1 + i).Address(0, 0) & ","
+Next
+
+rok = Sheets("budżet").Range("B2").Value
+If nowy_miesiąc = "Styczeń" Then rok = rok + 1
+
+'wstawienie po lewej stronie formuły na sumę wszystkich wydatków w danym miesiącu
+suma = Left(suma, Len(suma) - 1)
+Range("B4").Formula = "=" & chr(34) & nowy_miesiąc & " " & rok & " " & chr(10) & chr(34) & "&sum(" & suma & ")&" & chr(34) & " zł" & chr(10) & chr(34) & "&sum(" & suma & ")-D9-H9&" & chr(34) & " zł" & chr(34)
+Range("B4").WrapText = True
+Columns("B:B").AutoFit
+
+'obramowanie zewnętrzne
+With Range(Range("B4"), Cells(5 + ilość, Range("C3").End(xlToRight).Column))
+    .Borders(xlEdgeLeft).LineStyle = xlContinuous
+    .Borders(xlEdgeLeft).Weight = xlMedium
+    .Borders(xlEdgeTop).LineStyle = xlContinuous
+    .Borders(xlEdgeTop).Weight = xlMedium
+    .Borders(xlEdgeBottom).LineStyle = xlContinuous
+    .Borders(xlEdgeBottom).Weight = xlMedium
+    .Borders(xlEdgeRight).LineStyle = xlContinuous
+    .Borders(xlEdgeRight).Weight = xlMedium
+End With
+
+
+'wstawianie wartości domyślnych i w pierwszej kategorii sumy wydatków
+
+For j = Sheets("konfiguracja").Range("A2").Column To Sheets("konfiguracja").Range("A2").End(xlToRight).Column Step 2
+    
+    pozycja_1 = Sheets("konfiguracja").Cells(1, j).Value
+    
+    For k = Sheets("wydatki").Range("C3").Column To Sheets("wydatki").Range("C3").End(xlToRight).Column Step 2
+        pozycja_2 = Sheets("wydatki").Cells(2, k).Value
+        
+        If UCase(pozycja_1) = UCase(pozycja_2) Then
+            For L = 3 To Sheets("konfiguracja").Cells(1, j).End(xlDown).Row
+                Sheets("wydatki").Cells(1 + L, k).Value = Sheets("konfiguracja").Cells(L, j)
+                Sheets("wydatki").Cells(1 + L, k + 1).Value = Sheets("konfiguracja").Cells(L, j + 1)
+            Next L
+        End If
+        
+    Next k
+Next j
+
+'wstawianie formuły na sumę kosztów w kategorii wydatków w nowym miesiącu
+Cells(4 + ilość, 3).Value = "Suma:"
+Cells(4 + ilość, 4).FormulaR1C1 = "=SUM(R[-" & ilość & "]C:R[-1]C)"
+
+'wstawianie formuły na udział tej sumy kosztów w miesięcznych przychodach
+Cells(5 + ilość, 3).Value = "Udział:"
+Cells(5 + ilość, 4).Formula = "=IFERROR(" & Cells(4 + ilość, 4).Address(0, 0) & "/budżet!" & rng_Suma_Przychodów.Offset(0, 1 + numer_miesiąca).Address & ",""?"")"
+Cells(5 + ilość, 4).Style = "Percent"
+
+
+'kolorowanie i przeciągenie komórek z sumą do prawej
+With Range(Cells(4 + ilość, 3), Cells(5 + ilość, 4))
+    .Interior.ThemeColor = xlThemeColorAccent6
+    .Interior.TintAndShade = 0.399975585192419
+    .AutoFill Destination:=Range(Range(.Address), Cells(5 + ilość, Range("C3").End(xlToRight).Column)), Type:=xlFillDefault
+End With
+
+
+Call zrób_wykres
+Call transfer_danych
+
+End Sub
+
+Sub transfer_danych()
+'transfer danych z arkusza wydatki do arkusza budżet
+
+Dim ilość As Integer
+Dim i, k, A, of As Integer
+Dim kom As Range
+
+
+'========================SHEETS WYDATKI========================
+
+'procedura noworoczna - tworzenie nowego arkusza, itp.
+If wykryj_miesiąc("obecny") = "Styczeń" Then
+    Call gdy_nowy_rok
+End If
+
+'funkcja służy do określenia liczby rzędów w miesiącu na podstawie arkusza konfiguracja
+ilość = Ilość_rzędów_bazowa() - 2
+
+'wypisywanie tytułów kategorii
+'For k = Sheets("wydatki").Range("C3").Column To Sheets("wydatki").Range("C3").End(xlToRight).Column Step 2
+    'a = 18 + (k + 1) / 2
+    'Sheets("budżet").Cells(16 + (k + 1) / 2, 2).Value = Sheets("wydatki").Cells(2, k).Value
+'Next k
+
+
+'========================SHEETS BUDŻET========================
+Sheets("budżet").Activate
+
+'wstawianie odnośników do sum wydatków z poszczególnych kategorii dla aktualnego miesiąca
+i = 0
+For Each kom In Range(rng_Wydatki.Offset(1, 0), rng_Wydatki.Offset(1, 0).End(xlDown))
+    Cells(kom.Row, 2 + numer_miesiąca).Formula = "=wydatki!" & Sheets("wydatki").Cells(4 + ilość, 4 + 2 * i).Address
+    i = i + 1
+Next kom
+
+'sumuj przychody
+Cells(rng_Suma_Przychodów.Row, 2 + numer_miesiąca).Formula = "=sum(" & Range(rng_Przychody.Offset(1, 0), rng_Przychody.End(xlDown)).Offset(0, numer_miesiąca).Address(0, 0) & ")"
+
+'sumuj wydatki
+Cells(rng_Suma_Wydatków.Row, 2 + numer_miesiąca).Formula = "=sum(" & Range(rng_Wydatki.Offset(2, 0), rng_Wydatki.End(xlDown)).Offset(0, numer_miesiąca).Address(0, 0) & ")"
+
+'sumuj inwestycje
+Cells(rng_Suma_Inwestycji.Row, 2 + numer_miesiąca).Formula = "=" & rng_Wydatki.Offset(1, numer_miesiąca).Address(0, 0)
+
+'licz wolną gotówkę
+Set rng_Suma_Wolnej_Gotówki = rng_Wolna_Gotówka.Offset(0, 13)
+Set rng_Wolna_Gotówka = rng_Wolna_Gotówka.Offset(0, numer_miesiąca)
+rng_Wolna_Gotówka.Select
+
+If wykryj_miesiąc("obecny") = "Styczeń" Then
+    rng_Wolna_Gotówka.Formula = "=" & rng_Wolna_Gotówka.Offset(-3, 0).Address(0, 0) & "-" & rng_Wolna_Gotówka.Offset(-2, 0).Address(0, 0) & "-" & rng_Wolna_Gotówka.Offset(-1, 0).Address(0, 0) & "+" & stary_rok & "!" & rng_Wolna_Gotówka.Offset(0, 12).Address(0, 0)
+    rng_Wolna_Gotówka.Offset(0, 12).Formula = "=" & rng_Wolna_Gotówka.Offset(-3, 12).Address(0, 0) & "-" & rng_Wolna_Gotówka.Offset(-2, 12).Address(0, 0) & "-" & rng_Wolna_Gotówka.Offset(-1, 12).Address(0, 0) & "+" & stary_rok & "!" & rng_Wolna_Gotówka.Offset(0, 12).Address(0, 0)
+Else
+    rng_Wolna_Gotówka.Formula = "=" & rng_Wolna_Gotówka.Offset(-3, 0).Address(0, 0) & "-" & rng_Wolna_Gotówka.Offset(-2, 0).Address(0, 0) & "-" & rng_Wolna_Gotówka.Offset(-1, 0).Address(0, 0) & "+" & rng_Wolna_Gotówka.Offset(0, -1).Address(0, 0)
+End If
+
+Sheets("wydatki").Activate
+
+End Sub
+
+
+
+
+'==================================================
+'=====================USUWANIE=====================
+'==================================================
+
+Sub usuń_pozycję()
+Dim i, ostatnia_kolumna As Integer
+
+i = ActiveCell.Row
+ostatnia_kolumna = Range("C3").End(xlToRight).Column
+
+Range(Cells(i, 2), Cells(i, ostatnia_kolumna)).Delete
+
+End Sub
+
+
+
+Sub usuń_miesiąc()
+
+Dim C, r1, r2 As Integer
+
+Application.ScreenUpdating = False
+
+Call Szukanie_komórek
+
+'jeśli obecnym miesiącem jest styczeń, to usuwamy bieżący rok i aktywujemy stary
+If wykryj_miesiąc("obecny") = "Styczeń" Then
+    
+    If Sheets.Count = 3 Then
+        MsgBox "Nie ma tu czego usuwać!", vbCritical
+        Exit Sub
+    End If
+    
+    Sheets(4).Move Before:=Sheets(1)
+    Application.DisplayAlerts = False
+        Sheets("budżet").Delete
+    Application.DisplayAlerts = True
+    
+    Sheets(1).Name = "budżet"
+    Sheets("wydatki").Activate
+    
+    Range(Range("B4"), Range("C3").End(xlToRight).Offset(1, 0)).Select
+    Selection.Delete
+    Range("B4").Select
+    
+    'po usunięciu arkusza może się wykrzaczyć jakaś referencja
+    Dim rng1, rng2 As Range
+    Set rng1 = Range(Range("B4").Offset(1, 0), Range("B4").Offset(1, 0).Offset(1, 0).Offset(1, 0).Offset(1, 0).Offset(1, 0).Offset(1, 0).Offset(1, 0).Offset(1, 0).Offset(1, 0).Offset(1, 0).Offset(1, 0).Offset(1, 0))
+    Set rng2 = Range(rng1, rng1.Offset(0, Range("C3").End(xlToRight).Column - 2))
+    rng2.Replace What:="#REF!", Replacement:="budżet!", LookAt:=xlPart
+    
+Else
+
+    Sheets("budżet").Activate
+    
+    
+    r1 = rng_Przychody.Row + 1
+    r2 = rng_Przychody.End(xlDown).Row
+    C = rng_Suma_Przychodów.End(xlToRight).Column
+
+    Range(Cells(r1, C), Cells(r2, C)).ClearContents
+    Range(rng_Suma_Przychodów.End(xlToRight), rng_Suma_Przychodów.End(xlToRight).End(xlDown)).ClearContents
+    Range(rng_Wydatki.Offset(1, 0).End(xlToRight), rng_Wydatki.Offset(1, 0).End(xlToRight).End(xlDown)).ClearContents
+    
+    Sheets(1).Name = "budżet"
+    Sheets("wydatki").Activate
+        
+    Range(Range("B4"), Range("C3").End(xlToRight).Offset(1, 0)).Select
+    Selection.Delete
+    Range("B4").Select
+    
+End If
+
+
+
+Call usuwanie_ostatniego_wykresu
+
+Application.ScreenUpdating = True
+
+End Sub
+
